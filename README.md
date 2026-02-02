@@ -49,11 +49,19 @@ docker run -it --rm \
   rexezugedisasterrecovery/githubrepositories
 ```
 
-## Decrypt Archive
+## Restore
+
+### 1. Decrypt Archive
 
 ```bash
 PASSPHRASE="YOUR_ENCRYPTION_PASSWORD"
 
 gpg --batch --yes --passphrase "$PASSPHRASE" \
     -d "$TAR_FILE" | tar -xJf -
+```
+
+### 2. Restore Worktree
+
+```bash
+git clone $PATH_TO_UNARCHIVE_DIRECTORY $REPOSITORY_NAME
 ```
