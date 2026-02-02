@@ -45,5 +45,6 @@ docker run -it --rm \
   -e AWS_ACCESS_KEY_ID=xxx \
   -e AWS_SECRET_ACCESS_KEY=xxx \
   -e AWS_DEFAULT_REGION=us-east-1 \
+  -e PASSPHRASE="YOUR_ENCRYPTION_PASSWORD" \
   rexezugedisasterrecovery/githubrepositories
 ```

@@ -4,7 +4,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt update \
  && apt install --no-install-recommends -y \
-      git gh awscli openssh-client ca-certificates jq tar xz-utils
+      git gh awscli openssh-client ca-certificates jq tar xz-utils gnupg
 
 COPY overlay/ /
 

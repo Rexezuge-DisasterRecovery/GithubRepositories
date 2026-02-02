@@ -17,6 +17,7 @@ trap cleanup EXIT
 GITHUB_ORGS=${GITHUB_ORGS:-""}
 S3_BUCKET=${S3_BUCKET:-""}
 SSH_KEY_PATH="${SSH_KEY_PATH:-}"
+PASSPHRASE="${PASSPHRASE:-}"
 
 # 检查必需环境变量
 if [[ -z "$GITHUB_ORGS" ]]; then
@@ -26,6 +27,11 @@ fi
 
 if [[ -z "$S3_BUCKET" ]]; then
   echo "Error: S3_BUCKET is not set."
+  exit 1
+fi
+
+if [[ -z "$PASSPHRASE" ]]; then
+  echo "Error: PASSPHRASE is not set."
   exit 1
 fi
 
@@ -65,10 +71,11 @@ for ORG in $GITHUB_ORGS; do
         echo "Cloning $REPO_URL into $CLONE_DIR"
         git clone --mirror "$REPO_URL" "$CLONE_DIR"
 
-        # 压缩仓库
-         TAR_FILE="$TMP_DIR/$ORG/$REPO_NAME.tar.xz"
+        # 压缩仓库并加密
+        TAR_FILE="$TMP_DIR/$ORG/$REPO_NAME.tar.xz"
         echo "Compressing $CLONE_DIR to $TAR_FILE"
-        tar -cJf "$TAR_FILE" -C "$(dirname "$CLONE_DIR")" "$REPO_NAME"
+        tar -cJf - -C "$(dirname "$CLONE_DIR")" "$REPO_NAME" \
+          | gpg --batch --yes --passphrase "$PASSPHRASE" --symmetric --cipher-algo AES256 -o "$TAR_FILE"
     done
 done
 
