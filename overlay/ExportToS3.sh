@@ -46,7 +46,7 @@ for ORG in $GITHUB_ORGS; do
         git clone --mirror "$REPO_URL" "$CLONE_DIR"
 
         # 压缩仓库
-        TAR_FILE="$TMP_DIR/$ORG-$REPO_NAME.tar.xz"
+         TAR_FILE="$TMP_DIR/$ORG/$REPO_NAME.tar.xz"
         echo "Compressing $CLONE_DIR to $TAR_FILE"
         tar -cJf "$TAR_FILE" -C "$(dirname "$CLONE_DIR")" "$REPO_NAME"
     done
@@ -56,7 +56,7 @@ done
 echo "Uploading tar.xz files to S3 bucket: $S3_BUCKET"
 for FILE in "$TMP_DIR"/*.tar.xz "$TMP_DIR"/*/*.tar.xz; do
     if [[ -f "$FILE" ]]; then
-        KEY=$(basename "$FILE")
+        KEY=${FILE#"$TMP_DIR/"}
         AWS_CMD=(aws s3 cp "$FILE" "s3://$S3_BUCKET/$KEY")
 
         # 若环境变量存在且非空，则追加 endpoint 参数
