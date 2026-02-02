@@ -15,7 +15,7 @@ case "$COMMAND" in
 
   "")
     echo "No command provided. Executing ExportToS3.sh..."
-    exec /app/ExportToS3.sh
+    exec /ExportToS3.sh
     ;;
 
   *)

@@ -8,4 +8,4 @@ RUN apt update \
 
 COPY overlay/ /
 
-ENTRYPOINT ["/app/Init.sh"]
+ENTRYPOINT ["/Init.sh"]
