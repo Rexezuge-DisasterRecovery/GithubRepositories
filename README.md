@@ -4,7 +4,7 @@
 
 ```bash
 docker run -it --rm \
-  -v $HOME/.ssh:/root/.ssh \
+  -v $HOME/.ssh:/root/.ssh.d \
   -v $HOME/.gh:/root/.config/gh \
   rexezugedisasterrecovery/githubrepositories login
 ```
@@ -38,7 +38,7 @@ GitHub authentication completed.
 
 ```bash
 docker run -it --rm \
-  -v $HOME/.ssh:/root/.ssh \
+  -v $HOME/.ssh:/root/.ssh.d \
   -v $HOME/.gh:/root/.config/gh \
   -e GITHUB_ORGS="org1 org2" \
   -e S3_BUCKET="my-backup-bucket" \

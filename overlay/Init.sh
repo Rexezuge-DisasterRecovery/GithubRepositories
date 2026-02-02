@@ -5,6 +5,9 @@ COMMAND=${1:-""}
 
 echo "Container started with command: ${COMMAND:-<empty>}"
 
+# Changes the owner to the container user
+cp -r ~/.ssh.d ~/.ssh
+
 case "$COMMAND" in
   login)
     echo "Starting GitHub CLI login process..."
