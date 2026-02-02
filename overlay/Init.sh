@@ -1,6 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
+cleanup() {
+    local exit_code=$?   # 保存脚本退出码
+    rm -rf ~/.ssh
+    exit $exit_code      # 保持原始退出状态
+}
+trap cleanup EXIT
+
 COMMAND=${1:-""}
 
 echo "Container started with command: ${COMMAND:-<empty>}"
