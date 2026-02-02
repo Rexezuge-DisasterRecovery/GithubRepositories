@@ -1,10 +1,21 @@
 #!/bin/bash
 set -euo pipefail
 
+TMP_DIR=$(mktemp -d)
+
+cleanup() {
+    local exit_code=$?   # 保存脚本退出码
+    echo "Cleaning up temporary directory: $TMP_DIR"
+    rm -rf "$TMP_DIR"
+    exit $exit_code      # 保持原始退出状态
+}
+
+# 无论成功或失败都会触发
+trap cleanup EXIT
+
 # 配置变量
 GITHUB_ORGS=${GITHUB_ORGS:-""}
 S3_BUCKET=${S3_BUCKET:-""}
-TMP_DIR=$(mktemp -d)
 SSH_KEY_PATH="${SSH_KEY_PATH:-}"
 
 # 检查必需环境变量
@@ -86,6 +97,3 @@ for FILE in "$TMP_DIR"/*.tar.xz "$TMP_DIR"/*/*.tar.xz; do
 done
 
 echo "All repositories processed successfully."
-
-# 清理临时目录
-rm -rf "$TMP_DIR"
