@@ -4,9 +4,8 @@ set -euo pipefail
 # 配置变量
 GITHUB_ORGS=${GITHUB_ORGS:-""}
 S3_BUCKET=${S3_BUCKET:-""}
-SSH_KEY_PATH=${SSH_KEY_PATH:-""}
 TMP_DIR=$(mktemp -d)
-GITHUB_SSH_COMMAND="ssh -i $SSH_KEY_PATH -o StrictHostKeyChecking=no"
+SSH_KEY_PATH="${SSH_KEY_PATH:-}"
 
 # 检查必需环境变量
 if [[ -z "$GITHUB_ORGS" ]]; then
@@ -17,6 +16,16 @@ fi
 if [[ -z "$S3_BUCKET" ]]; then
   echo "Error: S3_BUCKET is not set."
   exit 1
+fi
+
+if [ -n "$SSH_KEY_PATH" ]; then
+    if [ ! -f "$SSH_KEY_PATH" ]; then
+        echo "ERROR: SSH key file not found at $SSH_KEY_PATH" >&2
+        exit 1
+    fi
+    GITHUB_SSH_COMMAND="ssh -i \"$SSH_KEY_PATH\" -o StrictHostKeyChecking=no"
+else
+    GITHUB_SSH_COMMAND="ssh -o StrictHostKeyChecking=no"
 fi
 
 echo "Using temporary working directory: $TMP_DIR"
