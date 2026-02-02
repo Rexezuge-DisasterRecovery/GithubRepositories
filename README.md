@@ -48,3 +48,12 @@ docker run -it --rm \
   -e PASSPHRASE="YOUR_ENCRYPTION_PASSWORD" \
   rexezugedisasterrecovery/githubrepositories
 ```
+
+## Decrypt Archive
+
+```bash
+PASSPHRASE="YOUR_ENCRYPTION_PASSWORD"
+
+gpg --batch --yes --passphrase "$PASSPHRASE" \
+    -d "$TAR_FILE" | tar -xJf -
+```
