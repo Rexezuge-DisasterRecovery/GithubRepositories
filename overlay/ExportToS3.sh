@@ -57,7 +57,21 @@ echo "Uploading tar.xz files to S3 bucket: $S3_BUCKET"
 for FILE in "$TMP_DIR"/*.tar.xz "$TMP_DIR"/*/*.tar.xz; do
     if [[ -f "$FILE" ]]; then
         KEY=$(basename "$FILE")
-        aws s3 cp "$FILE" "s3://$S3_BUCKET/$KEY" --endpoint-url <url>
+        AWS_CMD=(aws s3 cp "$FILE" "s3://$S3_BUCKET/$KEY")
+
+        # 若环境变量存在且非空，则追加 endpoint 参数
+        if [[ -n "${S3_ENDPOINT_URL:-}" ]]; then
+            # 可选：基础格式校验（防止误配置）
+            if [[ ! "$S3_ENDPOINT_URL" =~ ^https?:// ]]; then
+                echo "ERROR: Invalid S3_ENDPOINT_URL format: $S3_ENDPOINT_URL" >&2
+                exit 1
+            fi
+            AWS_CMD+=(--endpoint-url "$S3_ENDPOINT_URL")
+        fi
+
+        # 执行上传
+        "${AWS_CMD[@]}"
+
         echo "Uploaded $KEY"
     fi
 done
