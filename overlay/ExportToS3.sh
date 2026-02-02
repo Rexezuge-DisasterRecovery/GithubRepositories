@@ -4,7 +4,7 @@ set -euo pipefail
 # 配置变量
 GITHUB_ORGS=${GITHUB_ORGS:-""}
 S3_BUCKET=${S3_BUCKET:-""}
-SSH_KEY_PATH=${SSH_KEY_PATH:-"$HOME/.ssh/id_rsa"}
+SSH_KEY_PATH=${SSH_KEY_PATH:-""}
 TMP_DIR=$(mktemp -d)
 GITHUB_SSH_COMMAND="ssh -i $SSH_KEY_PATH -o StrictHostKeyChecking=no"
 
