@@ -1,4 +1,4 @@
-FROM debian:12-slim
+FROM debian:12-slim AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -7,5 +7,9 @@ RUN apt update \
       git gh awscli openssh-client ca-certificates jq tar xz-utils gnupg
 
 COPY overlay/ /
+
+FROM scratch
+
+COPY --from=builder / /
 
 ENTRYPOINT ["/Init.sh"]
