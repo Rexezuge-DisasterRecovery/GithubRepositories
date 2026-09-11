@@ -173,6 +173,18 @@ ensure_gh_auth() {
 
 COMMAND=${1:-""}
 
+GIT_SHA_RAW="${GIT_SHA:-$(cat /GIT_SHA 2>/dev/null || echo unknown)}"
+GIT_SHA_RAW="$(printf '%s' "$GIT_SHA_RAW" | tr -d '[:space:]')"
+if [[ -z "$GIT_SHA_RAW" ]]; then
+    GIT_SHA_RAW="unknown"
+fi
+if [[ "$GIT_SHA_RAW" == "unknown" ]]; then
+    GIT_SHA_SHORT="unknown"
+else
+    GIT_SHA_SHORT="$(printf '%s' "$GIT_SHA_RAW" | cut -c1-7)"
+fi
+echo "Image commit: $GIT_SHA_SHORT"
+
 echo "Container started with command: ${COMMAND:-<empty>}"
 
 case "$COMMAND" in
