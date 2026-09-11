@@ -1,6 +1,55 @@
-## Usage
+## Usage (single run, recommended)
 
-### 1. Login to Github CLI
+No volume mounts required. The container auto-authenticates, generates an
+ephemeral SSH key, uploads its public half to your GitHub account, runs the
+backup, then deletes the public key on exit.
+
+Required token scopes (classic PAT): `repo`, `read:org`, `admin:public_key`.
+Fine-grained PAT: repository read + organization read + public key read/write
+for the account that owns the key.
+
+### Single run with token (non-interactive, CI/cron)
+
+```bash
+docker run --rm \
+  -e GH_TOKEN="$GH_TOKEN" \
+  -e GITHUB_ORGS="org1 org2" \
+  -e S3_BUCKET="my-backup-bucket" \
+  -e AWS_ACCESS_KEY_ID=xxx \
+  -e AWS_SECRET_ACCESS_KEY=xxx \
+  -e AWS_DEFAULT_REGION=us-east-1 \
+  -e PASSPHRASE="YOUR_ENCRYPTION_PASSWORD" \
+  rexezugedisasterrecovery/githubrepositories
+```
+
+`GITHUB_TOKEN` works as an alias for `GH_TOKEN`.
+
+### Single run without token (interactive)
+
+```bash
+docker run -it --rm \
+  -e GITHUB_ORGS="org1 org2" \
+  -e S3_BUCKET="my-backup-bucket" \
+  -e AWS_ACCESS_KEY_ID=xxx \
+  -e AWS_SECRET_ACCESS_KEY=xxx \
+  -e AWS_DEFAULT_REGION=us-east-1 \
+  -e PASSPHRASE="YOUR_ENCRYPTION_PASSWORD" \
+  rexezugedisasterrecovery/githubrepositories
+```
+
+You will be guided through the `gh auth login` device flow once, then the
+backup starts immediately in the same container.
+
+Ephemeral key notes:
+
+- Title format: `githubrepositories-<hostname>-<unix-timestamp>`.
+- Deleted automatically via `gh ssh-key delete` on container exit.
+- If the container is hard-killed (`docker kill -9`), cleanup is skipped;
+  prune leftovers with `gh ssh-key list` / `gh ssh-key delete`.
+
+### Legacy two-step with persistent mounts (optional)
+
+If you prefer reusing your own SSH key and `gh` config across runs:
 
 ```bash
 docker run -it --rm \
@@ -8,33 +57,6 @@ docker run -it --rm \
   -v $HOME/.gh:/root/.config/gh \
   rexezugedisasterrecovery/githubrepositories login
 ```
-
----
-
-```text
-Container started with command: login
-Starting GitHub CLI login process...
-You may need to complete device authentication in the browser.
-? What account do you want to log into? GitHub.com
-? What is your preferred protocol for Git operations? SSH
-? Upload your SSH public key to your GitHub account? /root/.ssh/id_ed25519.pub
-? Title for your SSH key: GitHub CLI
-? How would you like to authenticate GitHub CLI? Login with a web browser
-
-! First copy your one-time code: 1111-2222
-Press Enter to open github.com in your browser... 
-! Failed opening a web browser at https://github.com/login/device
-  exec: "xdg-open,x-www-browser,www-browser,wslview": executable file not found in $PATH
-  Please try entering the URL in your browser manually
-✓ Authentication complete.
-- gh config set -h github.com git_protocol ssh
-✓ Configured git protocol
-✓ Uploaded the SSH key to your GitHub account: /root/.ssh/id_ed25519.pub
-✓ Logged in as XXXXX
-GitHub authentication completed.
-```
-
-### 2. Perform Backup
 
 ```bash
 docker run -it --rm \
@@ -48,6 +70,9 @@ docker run -it --rm \
   -e PASSPHRASE="YOUR_ENCRYPTION_PASSWORD" \
   rexezugedisasterrecovery/githubrepositories
 ```
+
+When `~/.ssh.d` is mounted, its keys are used as-is (no ephemeral key is
+generated or uploaded).
 
 ## Restore
 

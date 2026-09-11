@@ -40,9 +40,19 @@ if [ -n "$SSH_KEY_PATH" ]; then
         echo "ERROR: SSH key file not found at $SSH_KEY_PATH" >&2
         exit 1
     fi
-    GITHUB_SSH_COMMAND="ssh -i \"$SSH_KEY_PATH\" -o StrictHostKeyChecking=no"
+    GITHUB_SSH_COMMAND="ssh -i $SSH_KEY_PATH -o StrictHostKeyChecking=no"
 else
     GITHUB_SSH_COMMAND="ssh -o StrictHostKeyChecking=no"
+fi
+
+# Preflight: fail fast with a clear message when gh is not authenticated.
+# (Init.sh normally guarantees this in single-run mode, but ExportToS3.sh
+# can also be invoked directly.)
+if ! gh auth status >/dev/null 2>&1; then
+    echo "ERROR: GitHub CLI is not authenticated." >&2
+    echo "Run the container without mounts and with GH_TOKEN set," >&2
+    echo "or run interactively (docker run -it ...) to complete 'gh auth login'." >&2
+    exit 1
 fi
 
 echo "Using temporary working directory: $TMP_DIR"
