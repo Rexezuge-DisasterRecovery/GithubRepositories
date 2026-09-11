@@ -1,5 +1,5 @@
 ARG GIT_SHA=unknown
-FROM debian:12-slim AS builder
+FROM debian:13-slim AS builder
 
 ARG GIT_SHA=unknown
 ARG DEBIAN_FRONTEND=noninteractive

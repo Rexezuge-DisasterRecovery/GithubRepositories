@@ -2,12 +2,17 @@
 set -euo pipefail
 
 # Single-run mode: no volume mounts required.
-# Flow for no-arg invocation: setup_ssh -> ensure_gh_auth -> run ExportToS3.sh
+# Flow for no-arg invocation: ensure_ssh_dir -> ensure_gh_auth -> generate -> upload -> ExportToS3.sh
+# Auth runs BEFORE key generation so `gh auth login` never sees an ephemeral
+# key to offer to upload as "GitHub CLI" (avoids HTTP 422 double-upload).
 # Ephemeral SSH keys generated in-container are uploaded via `gh ssh-key add`
 # and deleted on exit so GitHub doesn't accumulate deploy keys.
+# Adopted pre-existing keys (e.g. "GitHub CLI") are reused with a warning and
+# NEVER deleted on exit.
 
 EPHEMERAL_KEY=0
 UPLOADED_KEY_TITLE=""
+ADOPTED_KEY_TITLE=""
 
 cleanup() {
     local exit_code=$?
@@ -23,13 +28,15 @@ cleanup() {
         else
             gh ssh-key delete "$UPLOADED_KEY_TITLE" --yes 2>/dev/null || true
         fi
+    elif [[ -n "$ADOPTED_KEY_TITLE" ]]; then
+        echo "Preserving adopted pre-existing SSH key '$ADOPTED_KEY_TITLE' (not deleting)."
     fi
     rm -rf ~/.ssh
     exit "$exit_code"
 }
 trap cleanup EXIT
 
-setup_ssh() {
+ensure_ssh_dir() {
     mkdir -p ~/.ssh
     chmod 700 ~/.ssh
 
@@ -44,8 +51,12 @@ setup_ssh() {
 
     # Fix permissions on any pre-existing keys.
     chmod 600 ~/.ssh/id_ed25519 ~/.ssh/id_ecdsa ~/.ssh/id_rsa 2>/dev/null || true
+}
 
+generate_ephemeral_if_missing() {
     # Generate an ephemeral key when nothing usable exists.
+    # Must run AFTER gh auth so interactive `gh auth login` never offers to
+    # upload this key itself (the old setup_ssh -> login order caused 422).
     if [[ ! -f ~/.ssh/id_ed25519 && ! -f ~/.ssh/id_ecdsa && ! -f ~/.ssh/id_rsa ]]; then
         echo "No SSH key found. Generating ephemeral ed25519 key..."
         ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 -C "githubrepositories-backup-ephemeral"
@@ -57,16 +68,27 @@ setup_ssh() {
     fi
 }
 
+setup_ssh() {
+    # Backwards-compatible wrapper (old order). New code calls
+    # ensure_ssh_dir -> ensure_gh_auth -> generate_ephemeral_if_missing.
+    ensure_ssh_dir
+    generate_ephemeral_if_missing
+}
+
 gh_login_interactive() {
     # Interactive device/browser flow.
-    # setup_ssh() runs first, so an ephemeral key already exists on disk.
-    # Plain `gh auth login` would offer to upload that same key as
-    # "GitHub CLI", and the later maybe_upload_ephemeral_key() would then
-    # fail with `HTTP 422: key is already in use`. Skip gh's own upload and
-    # let maybe_upload_ephemeral_key() do the single controlled upload.
+    # With the new auth-before-keygen order there is normally no key on disk
+    # yet, so `gh auth login` has nothing to offer to upload. Still pass
+    # --skip-ssh-key when supported and let maybe_upload_ephemeral_key() do
+    # the single controlled upload afterwards.
+    local gh_ver=""
+    gh_ver=$(gh --version 2>/dev/null | head -n1 || echo "gh version unknown")
+    echo "GitHub CLI version: $gh_ver"
     if gh auth login --help 2>/dev/null | grep -q -- "--skip-ssh-key"; then
+        echo "Using 'gh auth login --skip-ssh-key' (single controlled upload later)."
         gh auth login -p ssh --skip-ssh-key
     else
+        echo "WARNING: this gh build lacks --skip-ssh-key; relying on auth-before-keygen order to avoid double upload."
         gh auth login
     fi
     # Backup clones via sshUrl, so force SSH regardless of what was picked.
@@ -93,7 +115,7 @@ maybe_upload_ephemeral_key() {
     if [[ "$EPHEMERAL_KEY" != "1" ]]; then
         return 0
     fi
-    if [[ -n "$UPLOADED_KEY_TITLE" ]]; then
+    if [[ -n "$UPLOADED_KEY_TITLE" || -n "$ADOPTED_KEY_TITLE" ]]; then
         return 0
     fi
     local pubkey_file="$HOME/.ssh/id_ed25519.pub"
@@ -102,8 +124,8 @@ maybe_upload_ephemeral_key() {
         return 0
     fi
     # If the same key material is already on the account (e.g. `gh auth login`
-    # uploaded it as "GitHub CLI" on an older image), adopt it instead of
-    # failing with HTTP 422.
+    # uploaded it as "GitHub CLI"), adopt it with a warning instead of
+    # failing with HTTP 422. Adopted keys are NEVER deleted on exit.
     local local_key_body=""
     local_key_body=$(awk '{print $2}' "$pubkey_file" 2>/dev/null || true)
     if [[ -n "$local_key_body" ]]; then
@@ -113,8 +135,8 @@ maybe_upload_ephemeral_key() {
             local existing_title=""
             existing_title=$(printf '%s' "$existing" | cut -f2-)
             if [[ -n "$existing_title" && "$existing_title" != "null" ]]; then
-                echo "Ephemeral SSH public key already exists on GitHub account as '$existing_title'. Skipping upload."
-                UPLOADED_KEY_TITLE="$existing_title"
+                echo "WARNING: ephemeral SSH public key already exists on GitHub account as '$existing_title'. Reusing it; it will NOT be deleted on exit."
+                ADOPTED_KEY_TITLE="$existing_title"
                 return 0
             fi
         fi
@@ -130,7 +152,9 @@ maybe_upload_ephemeral_key() {
         return 0
     fi
     echo "$add_output" >&2
-    # Tolerate the duplicate-key race: re-check and adopt instead of aborting.
+    # Proceed + warn on duplicate-key race: adopt if possible, otherwise still
+    # proceed since SSH will typically work via the already-uploaded key
+    # (e.g. "GitHub CLI"). Only hard-fail on genuine non-duplicate errors.
     if printf '%s' "$add_output" | grep -qiE "already in use|Validation Failed|already exists"; then
         local retry=""
         retry=$(find_existing_key_by_body "$local_key_body" || true)
@@ -138,20 +162,24 @@ maybe_upload_ephemeral_key() {
             local retry_title=""
             retry_title=$(printf '%s' "$retry" | cut -f2-)
             if [[ -n "$retry_title" && "$retry_title" != "null" ]]; then
-                echo "Key material already on account as '$retry_title'. Reusing it; it will be removed on exit."
-                UPLOADED_KEY_TITLE="$retry_title"
+                echo "WARNING: key material already on account as '$retry_title'. Reusing it; it will NOT be deleted on exit. Proceeding with backup."
+                ADOPTED_KEY_TITLE="$retry_title"
                 return 0
             fi
         fi
+        echo "WARNING: key already in use on GitHub account but could not confirm via 'gh ssh-key list' (possible scope/API lag). Proceeding with backup via existing key; nothing will be deleted on exit." >&2
+        ADOPTED_KEY_TITLE="unknown-duplicate"
+        return 0
     fi
     echo "ERROR: failed to upload ephemeral SSH key." >&2
     return 1
 }
 
 ensure_gh_auth() {
+    # Authenticate only. Callers run generate_ephemeral_if_missing +
+    # maybe_upload_ephemeral_key afterwards (auth-before-keygen order).
     if gh auth status >/dev/null 2>&1; then
         echo "GitHub CLI already authenticated."
-        maybe_upload_ephemeral_key
         return 0
     fi
 
@@ -167,8 +195,6 @@ ensure_gh_auth() {
         gh_login_interactive
         echo "GitHub authentication completed."
     fi
-
-    maybe_upload_ephemeral_key
 }
 
 COMMAND=${1:-""}
@@ -189,11 +215,11 @@ echo "Container started with command: ${COMMAND:-<empty>}"
 
 case "$COMMAND" in
   login)
-    setup_ssh
+    ensure_ssh_dir
     # Manual login-only (legacy). Reuses token if provided, else interactive.
+    # Auth first so `gh auth login` never sees the ephemeral key.
     if gh auth status >/dev/null 2>&1; then
         echo "GitHub CLI already authenticated."
-        maybe_upload_ephemeral_key
     elif [[ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
         ensure_gh_auth
     else
@@ -201,14 +227,17 @@ case "$COMMAND" in
         echo "You may need to complete device authentication in the browser."
         gh_login_interactive
         echo "GitHub authentication completed."
-        maybe_upload_ephemeral_key
     fi
+    generate_ephemeral_if_missing
+    maybe_upload_ephemeral_key
     ;;
 
   "")
     echo "No command provided. Running single-run backup (auth + export)..."
-    setup_ssh
+    ensure_ssh_dir
     ensure_gh_auth
+    generate_ephemeral_if_missing
+    maybe_upload_ephemeral_key
     # NOTE: intentionally NOT exec'd so the EXIT trap can remove the
     # ephemeral SSH public key from the GitHub account afterwards.
     /ExportToS3.sh
