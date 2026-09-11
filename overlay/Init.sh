@@ -57,6 +57,38 @@ setup_ssh() {
     fi
 }
 
+gh_login_interactive() {
+    # Interactive device/browser flow.
+    # setup_ssh() runs first, so an ephemeral key already exists on disk.
+    # Plain `gh auth login` would offer to upload that same key as
+    # "GitHub CLI", and the later maybe_upload_ephemeral_key() would then
+    # fail with `HTTP 422: key is already in use`. Skip gh's own upload and
+    # let maybe_upload_ephemeral_key() do the single controlled upload.
+    if gh auth login --help 2>/dev/null | grep -q -- "--skip-ssh-key"; then
+        gh auth login -p ssh --skip-ssh-key
+    else
+        gh auth login
+    fi
+    # Backup clones via sshUrl, so force SSH regardless of what was picked.
+    gh config set -h github.com git_protocol ssh >/dev/null 2>&1 || true
+}
+
+find_existing_key_by_body() {
+    # $1 = local key body (base64 part). Prints "<id><TAB><title>" or nothing.
+    local key_body="$1"
+    local keys_json=""
+    keys_json=$(gh ssh-key list --json id,title,key 2>/dev/null || true)
+    if [[ -z "$keys_json" ]]; then
+        return 0
+    fi
+    if command -v jq >/dev/null 2>&1; then
+        echo "$keys_json" | jq -r --arg k "$key_body" '.[] | select(.key | contains($k)) | "\(.id)\t\(.title)"' 2>/dev/null | head -n1 || true
+    else
+        # Fallback without jq: gh's builtin query language.
+        gh ssh-key list --json id,title,key -q ".[] | select(.key | contains(\"$key_body\")) | \"\(.id)\t\(.title)\"" 2>/dev/null | head -n1 || true
+    fi
+}
+
 maybe_upload_ephemeral_key() {
     if [[ "$EPHEMERAL_KEY" != "1" ]]; then
         return 0
@@ -64,13 +96,56 @@ maybe_upload_ephemeral_key() {
     if [[ -n "$UPLOADED_KEY_TITLE" ]]; then
         return 0
     fi
+    local pubkey_file="$HOME/.ssh/id_ed25519.pub"
+    if [[ ! -f "$pubkey_file" ]]; then
+        echo "WARNING: ephemeral key flag set but $pubkey_file not found, skipping upload." >&2
+        return 0
+    fi
+    # If the same key material is already on the account (e.g. `gh auth login`
+    # uploaded it as "GitHub CLI" on an older image), adopt it instead of
+    # failing with HTTP 422.
+    local local_key_body=""
+    local_key_body=$(awk '{print $2}' "$pubkey_file" 2>/dev/null || true)
+    if [[ -n "$local_key_body" ]]; then
+        local existing=""
+        existing=$(find_existing_key_by_body "$local_key_body" || true)
+        if [[ -n "$existing" ]]; then
+            local existing_title=""
+            existing_title=$(printf '%s' "$existing" | cut -f2-)
+            if [[ -n "$existing_title" && "$existing_title" != "null" ]]; then
+                echo "Ephemeral SSH public key already exists on GitHub account as '$existing_title'. Skipping upload."
+                UPLOADED_KEY_TITLE="$existing_title"
+                return 0
+            fi
+        fi
+    fi
     local host_id
     host_id=$(cat /etc/hostname 2>/dev/null || echo "container")
     local title="githubrepositories-${host_id}-$(date +%s)"
     echo "Uploading ephemeral SSH public key to GitHub account (title: $title)..."
-    gh ssh-key add ~/.ssh/id_ed25519.pub --title "$title"
-    UPLOADED_KEY_TITLE="$title"
-    echo "Ephemeral key uploaded. It will be removed automatically on exit."
+    local add_output=""
+    if add_output=$(gh ssh-key add "$pubkey_file" --title "$title" 2>&1); then
+        UPLOADED_KEY_TITLE="$title"
+        echo "Ephemeral key uploaded. It will be removed automatically on exit."
+        return 0
+    fi
+    echo "$add_output" >&2
+    # Tolerate the duplicate-key race: re-check and adopt instead of aborting.
+    if printf '%s' "$add_output" | grep -qiE "already in use|Validation Failed|already exists"; then
+        local retry=""
+        retry=$(find_existing_key_by_body "$local_key_body" || true)
+        if [[ -n "$retry" ]]; then
+            local retry_title=""
+            retry_title=$(printf '%s' "$retry" | cut -f2-)
+            if [[ -n "$retry_title" && "$retry_title" != "null" ]]; then
+                echo "Key material already on account as '$retry_title'. Reusing it; it will be removed on exit."
+                UPLOADED_KEY_TITLE="$retry_title"
+                return 0
+            fi
+        fi
+    fi
+    echo "ERROR: failed to upload ephemeral SSH key." >&2
+    return 1
 }
 
 ensure_gh_auth() {
@@ -89,7 +164,7 @@ ensure_gh_auth() {
     else
         echo "Starting GitHub CLI login process..."
         echo "You may need to complete device authentication in the browser."
-        gh auth login
+        gh_login_interactive
         echo "GitHub authentication completed."
     fi
 
@@ -112,7 +187,7 @@ case "$COMMAND" in
     else
         echo "Starting GitHub CLI login process..."
         echo "You may need to complete device authentication in the browser."
-        gh auth login
+        gh_login_interactive
         echo "GitHub authentication completed."
         maybe_upload_ephemeral_key
     fi
